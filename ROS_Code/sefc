@@ -1,0 +1,57 @@
+import rospy
+from clover import srv
+from std_srvs.srv import Trigger
+from sensor_msgs.msg import Image
+from cv_bridge import CvBridge
+import cv2 as cv
+
+rospy.init_node('flight')
+bridge = CvBridge()
+
+get_telemetry = rospy.ServiceProxy('get_telemetry', srv.GetTelemetry)
+navigate = rospy.ServiceProxy('navigate', srv.Navigate)
+navigate_global = rospy.ServiceProxy('navigate_global', srv.NavigateGlobal)
+set_position = rospy.ServiceProxy('set_position', srv.SetPosition)
+set_velocity = rospy.ServiceProxy('set_velocity', srv.SetVelocity)
+set_attitude = rospy.ServiceProxy('set_attitude', srv.SetAttitude)
+set_rates = rospy.ServiceProxy('set_rates', srv.SetRates)
+land = rospy.ServiceProxy('land', Trigger)
+
+def navigate_wait(x=0, y=0, z=0, yaw=float('nan'), speed=0.5, frame_id='', auto_arm=False, tolerance=0.2):
+    navigate(x=x, y=y, z=z, yaw=yaw, speed=speed, frame_id=frame_id, auto_arm=auto_arm)
+
+    while not rospy.is_shutdown():
+        telem = get_telemetry(frame_id='navigate_target')
+        if math.sqrt(telem.x ** 2 + telem.y ** 2 + telem.z ** 2) < tolerance:
+            break
+        rospy.sleep(0.2)
+
+def image_callback(data):
+    cv_image = bridge.imgmsg_to_cv2(data, 'bgr8')  # OpenCV image
+    image_pub.publish(bridge.cv2_to_imgmsg(cv_image, 'bgr8'))
+
+def flight(v):
+    global val
+    if v==0:
+        val +=1
+        # Взлет на высоту 1 м
+        navigate(x=0, y=0, z=1, frame_id='body', auto_arm=True)
+
+        # Ожидание 3 секунды
+        rospy.sleep(3)
+
+        # Пролет вперед 1 метр
+        navigate(x=1, y=0, z=0, frame_id='body')
+
+        # Ожидание 3 секунды
+        rospy.sleep(3)
+
+        # Посадка
+        land()
+
+val = 0
+while not rospy.is_shutdown():
+    flight(val)
+    image_sub = rospy.Subscriber('main_camera/image_raw', Image, image_callback, queue_size=1)
+    image_pub = rospy.Publisher('~debug', Image, queue_size=1)
+
